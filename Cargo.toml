@@ -1,0 +1,15 @@
+[package]
+name = "pico-tls"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+builtin_macros = { git = "https://github.com/verus-lang/verus.git" }
+builtin = { git = "https://github.com/verus-lang/verus.git" }
+vstd = { git = "https://github.com/verus-lang/verus.git" }
+
+[package.metadata.verus]
+verify = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(verus_keep_ghost)"] }
