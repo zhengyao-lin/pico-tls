@@ -46,6 +46,7 @@ impl Label {
 pub type Pred = spec_fn(Data) -> bool;
 
 pub enum Type {
+    /// TODO
     ExtractKey(Label, Pred),
     ExpandKey(spec_fn(Seq<u8>) -> Type),
     EncKey(Label, Pred),
@@ -132,7 +133,6 @@ impl Data {
                 &&& pred(res)
             }
         }
-
     {
         unimplemented!()
     }
@@ -148,42 +148,23 @@ impl Data {
     }
 }
 
-// pub fn test() {
-//     broadcast use Label::axioms;
+pub trait Environment {
+    fn output(&mut self, data: &Data)
+        requires data.is_public();
 
-//     // name data: nonce
-//     // name key1: enckey Name(data)
-//     // name key2: enckey Name(key1)
-
-//     let data = Data::fresh_nonce();
-//     let key1 = Data::fresh_enckey(Ghost(data.label()), Ghost(|d| d == data));
-//     let key2 = Data::fresh_enckey(Ghost(key1.label()), Ghost(|d| d == key1));
-
-//     let ctxt1 = &Data::encrypt(&key1, &data);
-//     let ctxt2 = &Data::encrypt(&key2, &key1);
-//     // assert(data.label().flows(key1.label()));
-
-//     let input1 = Data::from_vec(vstd::slice::slice_to_vec(ctxt1.declassify()));
-//     let input2 = Data::from_vec(vstd::slice::slice_to_vec(ctxt2.declassify()));
-
-//     match Data::decrypt(&key2, &input2) {
-//         Some(res) => {
-//             if let Some(data2) = Data::decrypt(&res, &input1) {
-//                 assert(!key1.is_public() ==> data2 == data);
-//             }
-//         }
-//         None => {}
-//     }
-// }
+    fn input(&mut self) -> (res: Data)
+        ensures res.is_public();
+}
 
 /// TODO: Moving this to another fild causes panic (due to the broadcast)
-mod example {
+mod example1 {
 
 use super::*;
 
 broadcast use Label::axioms;
 
-pub open spec fn name_context_spec(data: &Data, key1: &Data, key2: &Data) -> bool {
+/// Specification for the name context (trusted)
+pub open spec fn spec_name_context(data: &Data, key1: &Data, key2: &Data) -> bool {
     // name data: nonce
     &&& data.typ() == Type::Nonce
     
@@ -200,33 +181,39 @@ pub open spec fn name_context_spec(data: &Data, key1: &Data, key2: &Data) -> boo
     &&& l.flows(key2.label())
 }
 
-pub fn alice(Ghost(data): Ghost<&Data>, Ghost(key1): Ghost<&Data>, key2: &Data, input1: &Data, input2: &Data) -> (res: Option<Data>)
+pub fn alice<E: Environment>(
+    env: &mut E,
+    Ghost(data): Ghost<&Data>,
+    Ghost(key1): Ghost<&Data>,
+    key2: &Data,
+) -> (res: Option<Data>)
     requires
-        name_context_spec(data, key1, key2),
-        input1.is_public(),
-        input2.is_public(),
-
+        spec_name_context(data, key1, key2),
     ensures
         res matches Some(res) ==>
-        !key1.is_public() ==> res == data
-{   
-    if let Some(key) = Data::decrypt(key2, input1) {
-        if let Some(d) = Data::decrypt(&key, input2) {
+        !key1.is_public() ==> res == data,
+{
+    if let Some(key) = Data::decrypt(key2, &env.input()) {
+        if let Some(d) = Data::decrypt(&key, &env.input()) {
             return Some(d);
         }
     }
     None
 }
 
-pub fn bob(data: &Data, key1: &Data, key2: &Data) -> (res: (Data, Data))
+pub fn bob<E: Environment>(
+    env: &mut E,
+    data: &Data,
+    key1: &Data,
+    key2: &Data,
+)
     requires
-        name_context_spec(data, key1, key2),
-
-    ensures
-        res.0.is_public(),
-        res.1.is_public(),
+        spec_name_context(data, key1, key2),
 {
-    (Data::encrypt(&key1, &data), Data::encrypt(&key2, &key1))
+    env.output(&Data::encrypt(&key1, &data));
+    // FAIL: env.output(&Data::encrypt(&key2, &data));
+    // FAIL: env.output(&data);
+    env.output(&Data::encrypt(&key2, &key1));
 }
 
 }
