@@ -1,3 +1,5 @@
+// Based on https://gist.github.com/gancherj/7f80e6d4fd813dc613d8bdee96ffdf5c
+
 #![allow(dead_code)]
 
 use vstd::prelude::*;
@@ -27,6 +29,11 @@ impl Label {
         ensures l1.flows(l3);
 
     #[verifier::external_body]
+    pub broadcast proof fn axiom_flows_zero(l: Label)
+        requires #[trigger] l.flows(Label::public())
+        ensures l == Label::public();
+
+    #[verifier::external_body]
     pub broadcast proof fn axiom_join_comm(l1: Label, l2: Label)
         ensures #[trigger] l1.join(l2) == l2.join(l1);
 
@@ -38,6 +45,7 @@ impl Label {
     broadcast group axioms {
         Label::axiom_flows_refl,
         Label::axiom_flows_trans,
+        Label::axiom_flows_zero,
         Label::axiom_join_comm,
         Label::axiom_join_public,
     }
@@ -46,9 +54,9 @@ impl Label {
 pub type Pred = spec_fn(Data) -> bool;
 
 pub enum Type {
-    /// TODO
-    ExtractKey(Label, Pred),
-    ExpandKey(spec_fn(Seq<u8>) -> Type),
+    ExtractKey(Box<Type>),
+    ExpandKey(spec_fn(Seq<u8>) -> Option<Type>),
+
     EncKey(Label, Pred),
     Nonce,
 }
@@ -274,6 +282,71 @@ impl Data {
     }
 }
 
+/// Axioms for KDF
+impl Data {
+    #[verifier::external_body]
+    pub fn extract(salt: &Data, ikm: &Data) -> (res: Data)
+        requires ({
+            ||| salt.is_public() && ikm.is_public()
+            // TODO: Do we want the other position to be public?
+            // TODO: what if both positions have valid keys?
+            ||| {
+                &&& !salt.is_public()
+                &&& salt.typ() matches Type::ExtractKey(..)
+            }
+            ||| {
+                &&& !ikm.is_public()
+                &&& ikm.typ() matches Type::ExtractKey(..)
+            }
+        })
+        ensures ({
+            ||| salt.is_public() && ikm.is_public() && res.is_public()
+            ||| {
+                &&& !salt.is_public()
+                &&& salt.typ() matches Type::ExtractKey(res_type)
+                &&& res.typ() == res_type
+                &&& res.label().flows(salt.label())
+                &&& !res.is_public() // We default to strict
+            }
+            ||| {
+                &&& !ikm.is_public()
+                &&& ikm.typ() matches Type::ExtractKey(res_type)
+                &&& res.typ() == res_type
+                &&& res.label().flows(ikm.label())
+                &&& !res.is_public() // We default to strict
+            }
+        })
+    {
+        unimplemented!()
+    }
+
+    #[verifier::external_body]
+    pub fn expand(prk: &Data, info: &Data) -> (res: Data)
+        requires ({
+            ||| prk.is_public() && info.is_public()
+            ||| {
+                &&& !prk.is_public()
+                &&& prk.typ() matches Type::ExpandKey(res_type)
+                &&& res_type(info@) is None ==> info.is_public()
+            }
+        })
+        ensures ({
+            ||| prk.is_public() && info.is_public() && res.is_public()
+            ||| {
+                &&& !prk.is_public()
+                &&& prk.typ() matches Type::ExpandKey(res_type)
+                &&& res_type(info@) is None ==> res.is_public()
+                &&& res_type(info@) matches Some(res_type) ==>
+                        res.typ() == res_type &&
+                        res.label().flows(prk.label()) &&
+                        !res.is_public() // We default to strict
+            }
+        })
+    {
+        unimplemented!()
+    }
+}
+
 pub trait Environment {
     fn output(&mut self, data: &Data)
         requires data.is_public();
@@ -415,6 +488,72 @@ mod example2 {
         let tagged = Data::from_vec(vec![0]).concat(data);
         assert(tagged@.subrange(1, tagged@.len() as int) == data@);
         env.output(&Data::encrypt(psk, &tagged));
+    }
+}
+
+/// KDF
+mod example3 {
+    use super::*;
+
+    broadcast use Label::axioms, Data::axioms;
+
+    /// Specification for the name context (trusted)
+    pub open spec fn spec_name_context(data1: &Data, data2: &Data, key: &Data) -> bool {
+        // name data1: nonce
+        &&& data1.typ() == Type::Nonce
+
+        // name data2: nonce
+        &&& data2.typ() == Type::Nonce
+
+        // name key: extractkey expandkey { info.
+        //     info == 0x01 -> strict enckey Name(data1),
+        //     info == 0x02 -> strict enckey Name(data2)
+        // }
+        &&& key.typ() matches Type::ExtractKey(extract_result)
+        &&& *extract_result matches Type::ExpandKey(cases)
+        &&& cases == |info: Seq<u8>| {
+            if info =~= seq![0u8] {
+                Some(Type::EncKey(data1.label(), |d: Data| d == data1))
+            } else if info =~= seq![1u8] {
+                Some(Type::EncKey(data2.label(), |d: Data| d == data2))
+            } else {
+                None
+            }
+        }
+        &&& data1.label().flows(key.label())
+        &&& data2.label().flows(key.label())
+    }
+
+    pub fn alice<E: Environment>(
+        env: &mut E,
+        data1: &Data,
+        data2: &Data,
+        key: &Data,
+    )
+        requires
+            spec_name_context(data1, data2, key),
+    {
+        let exp_key = Data::extract(key, &Data::from_vec(vec![]));
+
+        // assert(!key.is_public() ==> exp_key.typ() matches Type::ExpandKey(..));
+        // assert(exp_key.label().flows(key.label()));
+
+        let key1 = Data::expand(&exp_key, &Data::from_vec(vec![0]));
+
+        // assert(info1@ =~= seq![0u8]);
+        // assert(key1.label().flows(exp_key.label()));
+        // assert(!key.label().is_public() ==> !exp_key.label().is_public());
+        // assert(!exp_key.is_public() ==> key1.label().flows(exp_key.label()));
+        // assert(!key.is_public() ==> key1.typ() matches Type::EncKey(..));
+
+        let key2 = Data::expand(&exp_key, &Data::from_vec(vec![1]));
+        let key3 = Data::expand(&exp_key, &Data::from_vec(vec![2]));
+        assert(key3.is_public());
+
+        Data::encrypt(&key1, &data1);
+        // FAIL: Data::encrypt(&key1, &data2);
+
+        Data::encrypt(&key2, &data2);
     }
 }
 
