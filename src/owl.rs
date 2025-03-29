@@ -409,6 +409,7 @@ impl Data {
                 &&& res.typ() == res_type
                 &&& res.flows_data(salt)
                 &&& !res.is_public() // Currently assuming strictness
+                &&& res@.len() != 0
             }
             ||| {
                 &&& !ikm.is_public()
@@ -416,6 +417,7 @@ impl Data {
                 &&& res.typ() == res_type
                 &&& res.flows_data(ikm)
                 &&& !res.is_public() // Currently assuming strictness
+                &&& res@.len() != 0
             }
         })
     {
@@ -441,7 +443,8 @@ impl Data {
                 &&& res_type(info@) matches Some(res_type) ==>
                         res.typ() == res_type &&
                         res.flows_data(prk) &&
-                        !res.is_public() // We default to strict
+                        !res.is_public() && // We default to strict
+                        res@.len() != 0
             }
         })
     {
@@ -644,6 +647,7 @@ mod example3 {
         })
         &&& data1.flows_data(key)
         &&& data2.flows_data(key)
+        &&& key@.len() != 0
     }
 
     pub fn alice<E: Environment>(
@@ -669,15 +673,11 @@ mod example3 {
         // assert(key1.label().flows(exp_key.label()));
         // assert(!key.label().is_public() ==> !exp_key.label().is_public());
         // assert(!exp_key.is_public() ==> key1.label().flows(exp_key.label()));
-        assert(!key.is_public() ==> key1.typ() matches Type::EncKey(..));
-        assert(!key.is_public() ==> data1.flows(key1.typ()->EncKey_0));
-
-        // TODO: Need to show these somehow
-        assume(key1@.len() != 0 && data1.flows_data(&key1));
-        assume(key2@.len() != 0 && data2.flows_data(&key2));
+        // assert(!key.is_public() ==> key1.typ() matches Type::EncKey(..));
+        // assert(!key.is_public() ==> data1.flows(key1.typ()->EncKey_0));
 
         Data::encrypt(&key1, &data1);
-        // FAIL: Data::encrypt(&key1, &data2);
+        //  FAIL: Data::encrypt(&key1, &data2);
 
         Data::encrypt(&key2, &data2);
     }
