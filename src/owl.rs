@@ -66,12 +66,14 @@ impl Label {
     }
 }
 
-pub type Pred = spec_fn(Data) -> bool;
+pub type SecPred = spec_fn(Data) -> bool;
 
+/// TODO: want to avoid case analysis of types
+/// on a piece of unknown Data
 pub enum Type {
     ExtractKey(Box<Type>),
     ExpandKey(spec_fn(Seq<u8>) -> Option<Type>),
-    EncKey(Label, Pred),
+    EncKey(Label, SecPred),
     Nonce,
 }
 
@@ -86,10 +88,12 @@ impl View for Data {
 }
 
 /// `Data` is similar to `SecretBuf` in OwlC
-/// with two basic operations `concat` and `subrange`
+/// with two basic operations `concat` and `subrange`,
+/// but augmented with more structure: `range_type` and `label_at`
 ///
 /// User specification can mark a subrange of data with
-/// a specific type, or mark a byte with a specific label
+/// a specific type (`range_type`), or mark a byte with
+/// a specific label (`label_at`).
 impl Data {
     /// The subrange `[start, end)` of `self` can be used as `self.range_type(start, end)`
     /// TODO: or change to a relation?
@@ -205,6 +209,31 @@ impl Data {
     }
 }
 
+/// Axiom about (spec-level) equality
+impl Data {
+    /// Two `Data`s are considered equal at the spec level
+    /// if they have the same labels, types, and underlying data
+    pub open spec fn eq(&self, other: &Data) -> bool {
+        &&& self@ =~= other@
+        &&& forall |i|
+                #![trigger self.label_at(i)]
+                #![trigger other.label_at(i)]
+                0 <= i < self@.len() ==> self.label_at(i) == other.label_at(i)
+        &&& forall |i, j|
+                #![trigger self.range_type(i, j)]
+                #![trigger other.range_type(i, j)]
+                0 <= i <= j < self@.len() ==>
+                self.range_type(i, j) == other.range_type(i, j)
+    }
+
+    /// Any predicate cannot discern between two equal `Data`s
+    /// TODO: maybe too strong?
+    #[verifier::external_body]
+    pub broadcast proof fn axiom_indiscern(&self, other: &Data, pred: SecPred)
+        requires self.eq(other)
+        ensures #[trigger] pred(*self) == #[trigger] pred(*other);
+}
+
 /// Some macros
 impl Data {
     pub open spec fn typ(&self) -> Type {
@@ -238,6 +267,21 @@ impl Data {
 
     pub open spec fn is_public(&self) -> bool {
         self.flows(Label::public())
+    }
+
+    pub open spec fn take(&self, n: usize) -> Data {
+        self.subrange(0, n)
+    }
+
+    pub open spec fn skip(&self, n: usize) -> Data {
+        self.subrange(n, self@.len() as usize)
+    }
+
+    #[verifier::external_body]
+    pub fn append(&mut self, other: &Data)
+        ensures self == old(self).concat(other)
+    {
+        self.0.extend_from_slice(&other.0);
     }
 
     /// Createa a `Data` from the environment, which is assumd to be public
@@ -319,7 +363,7 @@ impl Data {
 /// Axioms for symmetric encryption
 impl Data {
     #[verifier::external_body]
-    pub fn fresh_enckey(Ghost(msg_label): Ghost<Label>, Ghost(pred): Ghost<Pred>) -> (res: Data)
+    pub fn fresh_enckey(Ghost(msg_label): Ghost<Label>, Ghost(pred): Ghost<SecPred>) -> (res: Data)
         ensures
             res.typ() == Type::EncKey(msg_label, pred),
             msg_label.flows_data(&res),
@@ -463,6 +507,8 @@ impl Data {
         Data::axiom_subrange_label,
         Data::axiom_concat_label_left,
         Data::axiom_concat_label_right,
+
+        Data::axiom_indiscern,
 
         Data::axiom_len_bounded,
 
