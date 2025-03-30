@@ -1,11 +1,11 @@
-#![allow(dead_code)]
-
 use vstd::prelude::*;
 
 use super::*;
 use crate::owl::{Data, SecPred};
 
 verus! {
+
+broadcast use crate::owl::axioms;
 
 // TODO: Verus panic
 // broadcast use Data::axioms;
@@ -47,7 +47,7 @@ impl SpecCombinator for Bytes {
         }
     }
 
-    open spec fn spec_security_policy(&self, s: &Data) -> bool {
+    open spec fn spec_input_security_policy(&self, s: &Data) -> bool {
         self.pred@(s.subrange(0, self.len))
     }
 
@@ -56,23 +56,19 @@ impl SpecCombinator for Bytes {
     proof fn prop_parse_serialize_roundtrip(&self, s: Seq<u8>) {}
 }
 
+impl PrefixSecure for Bytes {
+    proof fn prop_prefix_secure(&self, s1: Seq<u8>, s2: Seq<u8>) {}
+}
+
 /// TODO: performance
 impl Combinator for Bytes {
     type Type = Data;
 
-    open spec fn parse_requires(&self) -> bool {
-        true
-    }
-
-    open spec fn serialize_requires(&self, v: &Self::Type) -> bool {
+    open spec fn spec_output_security_policy(&self, v: &Self::Type) -> bool {
         self.pred@(*v)
     }
 
-    fn parse(&self, s: &Data) -> (res: Result<(usize, Self::Type), ParseError>)
-        ensures res matches Ok((_, v)) ==> self.pred@(v)
-    {
-        broadcast use Data::axiom_spec_subrange;
-
+    fn parse(&self, s: &Data) -> (res: Result<(usize, Self::Type), ParseError>) {
         if s.len() < self.len {
             return Err(ParseError::Invalid);
         }
@@ -80,25 +76,7 @@ impl Combinator for Bytes {
         Ok((self.len, s.subrange(0, self.len)))
     }
 
-    fn serialize(&self, v: &Self::Type, buf: &mut Data) -> (res: Result<usize, SerializeError>)
-    {
-        // TODO: use Data::axioms instead but this currently causes Verus panic
-        broadcast use
-            Data::axiom_spec_concat,
-            Data::axiom_spec_subrange,
-            Data::axiom_subrange_type,
-            Data::axiom_concat_type_left,
-            Data::axiom_concat_type_right,
-            Data::axiom_subrange_label,
-            Data::axiom_concat_label_left,
-            Data::axiom_concat_label_right,
-            Data::axiom_indiscern,
-            Data::axiom_len_bounded,
-            Data::lemma_flows_data_trans,
-            Data::lemma_flows_data_trans_alt,
-            Data::lemma_flows_data_to_public,
-            Data::lemma_cover_label;
-
+    fn serialize(&self, v: &Self::Type, buf: &mut Data) -> (res: Result<usize, SerializeError>) {
         if v.len() != self.len {
             return Err(SerializeError::Invalid);
         }

@@ -1,5 +1,6 @@
 mod owl;
 mod vest;
+mod examples;
 
 fn main() {
     // TODO
