@@ -12,7 +12,7 @@ broadcast use crate::owl::axioms;
 
 /// Bytes { len, pred } parses exactly `len` bytes
 /// with requirements that the bytes satisfy the security policy `pred`.
-struct Bytes {
+pub struct Bytes {
     /// Number of bytes to read
     pub len: usize,
 

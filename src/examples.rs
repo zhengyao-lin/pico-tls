@@ -206,4 +206,96 @@ mod example3 {
     }
 }
 
+/// Vest combinators
+mod example4 {
+    use super::*;
+    use crate::vest::*;
+
+    broadcast use crate::owl::axioms, axioms;
+
+    struct PairCont;
+
+    impl SpecExecFn for PairCont {
+        type Input = Data;
+        type Output = Bytes;
+
+        closed spec fn spec_call(&self, x: Seq<u8>) -> Bytes {
+            if x[0] == 0 {
+                Bytes { len: 4, pred: Ghost(|d: Data| true) }
+            } else {
+                Bytes { len: 8, pred: Ghost(|d: Data| d.is_public()) }
+            }
+        }
+
+        closed spec fn requires(&self, x: &Self::Input) -> bool {
+            x.is_public() && x@.len() == 1
+        }
+
+        closed spec fn ensures(&self, x: &Self::Input, y: Self::Output) -> bool {
+            y@ == self.spec_call(x@)
+        }
+
+        fn call(&self, x: &Self::Input) -> (y: Self::Output) {
+            if x.index(0) == 0 {
+                Bytes { len: 4, pred: Ghost(|d: Data| true) }
+            } else {
+                Bytes { len: 8, pred: Ghost(|d: Data| d.is_public()) }
+            }
+        }
+    }
+
+    closed spec fn spec_format() -> SpecDepend<Bytes, Bytes> {
+        let tag = Bytes { len: 1, pred: Ghost(|d: Data| d.is_public() && d@.len() == 1) };
+        let pair = SpecDepend(tag@, PairCont@);
+        pair
+    }
+
+    fn format() -> (res: Depend<Bytes, Bytes, PairCont>)
+        ensures res@ == spec_format()
+    {
+        let tag = Bytes { len: 1, pred: Ghost(|d: Data| d.is_public() && d@.len() == 1) };
+        let pair = Depend(tag, PairCont);
+        pair
+
+        // let buf = Data::from_vec(vec![0, 1, 1, 1, 1]);
+        // assume(pair@.spec_input_security_policy(&buf));
+
+        // if let Ok((n, res)) = pair.parse(&buf) {
+        //     let mut out = Data::from_vec(vec![]);
+        //     pair.serialize(&res, &mut out);
+        // }
+
+        // let buf1 = Data::from_vec(vec![0]);
+        // let buf2 = Data::from_vec(vec![1, 1, 1, 1]);
+
+        // let res = ();
+    }
+
+    // pub open spec fn spec_name_context(data: &Data, psk: &Data) -> bool {
+    //     // name data: nonce
+    //     &&& data.typ() == Type::Nonce
+
+    //     // name psk: enckey struct {
+    //     //     tag: Data<adv> |1|,
+    //     //     data: if tag == 0 then Name(data) else Data<adv>
+    //     // }
+    //     &&& psk.typ() matches Type::EncKey(l, p)
+    //     &&& data.flows(l) && l.flows_data(psk)
+    //     &&& p == |d: Data|
+    //             d.label_at(0).is_public() &&
+    //             if d@[0] == 0 {
+    //                 d@.subrange(1, d@.len() as int) == data@
+    //             } else {
+    //                 d.is_public()
+    //             }
+    //     &&& psk@.len() != 0
+    // }
+
+    // fn test() {
+    //     let format = format();
+
+
+    // }
+}
+
 }

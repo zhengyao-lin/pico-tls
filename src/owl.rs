@@ -42,9 +42,9 @@ pub struct Label;
 
 /// Semi-lattice structure of labels with `public` being the zero element
 impl Label {
-    pub spec fn public() -> Label;
-    pub spec fn join(self, l: Label) -> Label;
-    pub spec fn flows(self, l: Label) -> bool;
+    pub uninterp spec fn public() -> Label;
+    pub uninterp spec fn join(self, l: Label) -> Label;
+    pub uninterp spec fn flows(self, l: Label) -> bool;
 
     pub open spec fn is_public(self) -> bool {
         self.flows(Label::public())
@@ -119,10 +119,10 @@ impl View for Data {
 impl Data {
     /// The subrange `[start, end)` of `self` can be used as `self.range_type(start, end)`
     /// TODO: or change to a relation?
-    pub closed spec fn range_type(&self, start: usize, end: usize) -> Type;
+    pub uninterp spec fn range_type(&self, start: usize, end: usize) -> Type;
 
     /// The byte `self[i]` has label `self.label_at(i)`
-    pub closed spec fn label_at(&self, i: usize) -> Label;
+    pub uninterp spec fn label_at(&self, i: usize) -> Label;
 
     /// Concatenates two `Data`s
     #[verifier::when_used_as_spec(spec_concat)]
@@ -133,7 +133,7 @@ impl Data {
         Data(self.0.iter().chain(other.0.iter()).copied().collect())
     }
 
-    pub spec fn spec_concat(&self, other: &Data) -> Data;
+    pub uninterp spec fn spec_concat(&self, other: &Data) -> Data;
 
     /// Take the subrange of a `Data`
     #[verifier::when_used_as_spec(spec_subrange)]
@@ -145,7 +145,7 @@ impl Data {
         Data(self.0[start..end].to_vec())
     }
 
-    pub spec fn spec_subrange(&self, start: usize, end: usize) -> Data;
+    pub uninterp spec fn spec_subrange(&self, start: usize, end: usize) -> Data;
 
     // TODO: length is always public currently
     pub fn len(&self) -> (res: usize)
