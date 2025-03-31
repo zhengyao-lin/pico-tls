@@ -31,7 +31,7 @@ impl View for Bytes {
 impl SpecCombinator for Bytes {
     type Type = Seq<u8>;
 
-    closed spec fn spec_parse(&self, s: Seq<u8>) -> Option<(usize, Self::Type)> {
+    open spec fn spec_parse(&self, s: Seq<u8>) -> Option<(usize, Self::Type)> {
         if s.len() < self.len {
             None
         } else {
@@ -39,7 +39,7 @@ impl SpecCombinator for Bytes {
         }
     }
 
-    closed spec fn spec_serialize(&self, v: Self::Type) -> Option<Seq<u8>> {
+    open spec fn spec_serialize(&self, v: Self::Type) -> Option<Seq<u8>> {
         if v.len() != self.len {
             None
         } else {

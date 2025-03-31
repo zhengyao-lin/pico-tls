@@ -48,7 +48,7 @@ impl<F: SpecExecFn> SpecExecFnView for F {
 impl<A: SpecCombinator + PrefixSecure, B: SpecCombinator> SpecCombinator for SpecDepend<A, B> {
     type Type = (A::Type, B::Type);
 
-    closed spec fn spec_parse(&self, s: Seq<u8>) -> Option<(usize, Self::Type)> {
+    open spec fn spec_parse(&self, s: Seq<u8>) -> Option<(usize, Self::Type)> {
         if let Some((n, a)) = self.0.spec_parse(s) {
             if let Some((m, b)) = (self.1)(a).spec_parse(s.skip(n as int)) {
                 if n + m <= usize::MAX {
@@ -64,7 +64,7 @@ impl<A: SpecCombinator + PrefixSecure, B: SpecCombinator> SpecCombinator for Spe
         }
     }
 
-    closed spec fn spec_serialize(&self, v: Self::Type) -> Option<Seq<u8>> {
+    open spec fn spec_serialize(&self, v: Self::Type) -> Option<Seq<u8>> {
         if let Some(s1) = self.0.spec_serialize(v.0) {
             if let Some(s2) = (self.1)(v.0).spec_serialize(v.1) {
                 if s1.len() + s2.len() <= usize::MAX {

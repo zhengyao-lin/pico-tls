@@ -23,8 +23,11 @@ pub broadcast group data_axioms {
     Data::axiom_subrange_label,
     Data::axiom_concat_label_left,
     Data::axiom_concat_label_right,
+    Data::axiom_eq_take_skip,
     // Data::axiom_concat_undefined,
     Data::axiom_indiscern,
+    Data::lemma_eq_sym,
+    Data::lemma_eq_trans,
     Data::axiom_len_bounded,
     Data::lemma_flows_data_trans,
     Data::lemma_flows_data_trans_alt,
@@ -224,6 +227,12 @@ impl Data {
     #[verifier::external_body]
     pub broadcast proof fn axiom_len_bounded(&self)
         ensures #[trigger] self@.len() <= usize::MAX;
+
+    /// TODO: do we need this?
+    #[verifier::external_body]
+    pub broadcast proof fn axiom_eq_take_skip(&self, n: usize)
+        requires n <= self@.len()
+        ensures #[trigger] self.take(n).concat(&self.skip(n)).eq(self);
 }
 
 /// Axioms for declassification
@@ -261,6 +270,14 @@ impl Data {
     pub broadcast proof fn axiom_indiscern(&self, other: &Data, pred: SecPred)
         requires self.eq(other)
         ensures #[trigger] pred(*self) == #[trigger] pred(*other);
+
+    pub broadcast proof fn lemma_eq_sym(&self, other: &Data)
+        requires #[trigger] self.eq(other)
+        ensures other.eq(self) {}
+
+    pub broadcast proof fn lemma_eq_trans(&self, other1: &Data, other2: &Data)
+        requires #[trigger] self.eq(other1) && #[trigger] other1.eq(other2)
+        ensures self.eq(other2) {}
 }
 
 /// Some macros
@@ -321,6 +338,14 @@ impl Data {
             res@ == data@,
     {
         Data(data)
+    }
+
+    /// Cloning a `Data` preserves all labels and types
+    #[verifier::external_body]
+    pub fn clone(&self) -> (res: Data)
+        ensures res.eq(self)
+    {
+        Data(self.0.clone())
     }
 
     pub broadcast proof fn lemma_flows_data_trans(&self, l: Label, other: &Data)

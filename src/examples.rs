@@ -219,26 +219,26 @@ mod example4 {
     ///   tag: Data<adv> |1|,
     ///   data: if tag == 0 then Name(data) else Data<adv>
     /// }
-    closed spec fn spec_format(data: &Data) -> SpecDepend<Bytes, Bytes> {
+    pub closed spec fn spec_format(data: &Data) -> SpecDepend<Bytes, Bytes> {
         SpecDepend(
-            Bytes { len: 1, pred: Ghost(|d: Data| d.is_public() && d@.len() == 1) },
+            Bytes { len: 1, pred: Ghost(|d: Data| d.is_public()) },
             PairCont(Ghost(data))@,
         )
     }
 
-    fn format(data: Ghost<&Data>) -> (res: Depend<Bytes, Bytes, PairCont>)
+    pub fn format(data: Ghost<&Data>) -> (res: Depend<Bytes, Bytes, PairCont>)
         ensures
             res@ == spec_format(data@),
             res.parse_requires(),
             res.serialize_requires(),
     {
         Depend(
-            Bytes { len: 1, pred: Ghost(|d: Data| d.is_public() && d@.len() == 1) },
+            Bytes { len: 1, pred: Ghost(|d: Data| d.is_public()) },
             PairCont(data),
         )
     }
 
-    struct PairCont<'a>(Ghost<&'a Data>);
+    pub struct PairCont<'a>(Ghost<&'a Data>);
 
     impl<'a> SpecExecFn for PairCont<'a> {
         type Input = Data;
@@ -269,7 +269,7 @@ mod example4 {
         }
     }
 
-    closed spec fn spec_name_context(data: &Data, psk: &Data) -> bool {
+    pub closed spec fn spec_name_context(data: &Data, psk: &Data) -> bool {
         // name data: nonce
         &&& data.typ() == Type::Nonce
 
@@ -283,7 +283,7 @@ mod example4 {
         &&& psk@.len() != 0
     }
 
-    fn alice<E: Environment>(
+    pub fn alice<E: Environment>(
         env: &mut E,
         Ghost(data): Ghost<&Data>,
         psk: &Data,
@@ -319,36 +319,65 @@ mod example4 {
         None
     }
 
-    // fn bob<E: Environment>(
-    //     env: &mut E,
-    //     data: &Data,
-    //     psk: &Data,
-    // )
-    //     requires
-    //         spec_name_context(data, psk),
-    // {
-    //     let format = format(Ghost(data));
+    pub fn bob<E: Environment>(
+        env: &mut E,
+        data: &Data,
+        psk: &Data,
+    )
+        requires
+            spec_name_context(data, psk),
+    {
+        let format = format(Ghost(data));
 
-    //     let content = (Data::from_vec(vec![1]), Data::from_vec(vec![1, 1, 0]));
-    //     let mut buf = Data::from_vec(vec![]);
+        let content = (Data::from_vec(vec![1]), Data::from_vec(vec![1, 1, 0, 1, 1, 1, 1, 1]));
+        let mut buf = Data::from_vec(vec![]);
 
-    //     assert(format.spec_output_security_policy(&content));
+        // format.serialize(&(Data::from_vec(vec![0]), Data::from_vec(vec![1, 1, 0])), &mut buf);
+        // assert(format.spec_output_security_policy(&content));
 
-    //     if let Ok(n) = format.serialize(&content, &mut buf) {
-    //         assert(format@.spec_input_security_policy(&buf.skip(0)));
-    //         // assert(psk.is_public() ==> buf.is_public());
-    //         // assert(!psk.is_public() ==> buf.is_public());
-    //         // Data::encrypt(psk, &buf.subrange(0, buf.len()));
-    //     }
+        if let Ok(n) = format.serialize(&content, &mut buf) {
+            /// TODO: why is broadcast not working
+            proof {
+                // format@.prop_input_security_policy_indiscern(&buf, &buf.skip(0));
+                // format@.prop_serialize_parse_roundtrip(content@);
+            }
+            assert(format@.spec_input_security_policy(&buf));
 
-    //     // env.output(&Data::encrypt(psk, &content));
+            // assert(psk.is_public() ==> buf.is_public());
+            // assert(!psk.is_public() ==> buf.is_public());
 
-    //     // // FAIL: env.output(&Data::encrypt(psk, &Data::from_vec(vec![0]).concat(&Data::from_vec(vec![1, 1, 0]))));
+            // assume(!psk.is_public());
+            // assert(format@.0.spec_input_security_policy(&buf));
+            // assert(format@.spec_serialize(content@) is Some);
+            // assert(format@.spec_parse(buf@) is Some);
+            // assert(format@.0.spec_parse(buf@).unwrap().0 == 1);
+            // assert(format@.1(seq![1u8]).spec_input_security_policy(&buf.skip(1)));
+            // assert(buf.take(1).label_at(0).is_public());
+            assert(buf.take(1).is_public());
+            assert(buf.skip(1).is_public());
 
-    //     // let tagged = Data::from_vec(vec![0]).concat(data);
-    //     // assert(tagged@.subrange(1, tagged@.len() as int) == data@);
-    //     // env.output(&Data::encrypt(psk, &tagged));
-    // }
+            // assert(buf@.len() >= 1);
+            assert(buf.take(1).concat(&buf.skip(1)).eq(&buf));
+
+            env.output(&Data::encrypt(psk, &buf));
+        }
+
+        let content = (Data::from_vec(vec![0]), data.clone());
+        // FAIL: let content = (Data::from_vec(vec![1]), data.clone());
+        let mut buf = Data::from_vec(vec![]);
+
+        assert(format.spec_output_security_policy(&content));
+
+        if let Ok(n) = format.serialize(&content, &mut buf) {
+            assert(format@.spec_input_security_policy(&buf));
+
+            assert(buf.take(1).is_public());
+            assert(buf.skip(1).eq(data));
+            assert(buf.take(1).concat(&buf.skip(1)).eq(&buf));
+
+            env.output(&Data::encrypt(psk, &buf));
+        }
+    }
 }
 
 }

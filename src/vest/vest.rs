@@ -123,10 +123,8 @@ pub trait Combinator: View where
         ensures
             #![trigger self.spec_output_security_policy(v), other.spec_output_security_policy(v)]
             #![trigger self.spec_output_security_policy_corrupt(v), other.spec_output_security_policy_corrupt(v)]
-            self.spec_output_security_policy(v)
-            == other.spec_output_security_policy(v),
-            self.spec_output_security_policy_corrupt(v)
-            == other.spec_output_security_policy_corrupt(v);
+            self.spec_output_security_policy(v) == other.spec_output_security_policy(v),
+            self.spec_output_security_policy_corrupt(v) == other.spec_output_security_policy_corrupt(v);
 
     open spec fn parse_requires(&self) -> bool {
         true
