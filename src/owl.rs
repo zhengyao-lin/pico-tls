@@ -30,6 +30,7 @@ pub broadcast group data_axioms {
     Data::lemma_flows_data_trans_alt,
     Data::lemma_flows_data_to_public,
     Data::lemma_cover_label,
+    Data::lemma_eq_is_public,
 }
 
 pub broadcast group axioms {
@@ -372,6 +373,11 @@ impl Data {
         reveal(Data::cover_label);
         self.lemma_cover_label_helper(i, 0);
     }
+
+    pub broadcast proof fn lemma_eq_is_public(&self, other: &Data)
+        requires self.eq(other)
+        ensures #[trigger] self.is_public() == #[trigger] other.is_public()
+    {}
 
     // pub broadcast proof fn lemma_cover_label_to_flows_data(d1: &Data, d2: &Data)
     //     requires d1.label().flows(d2.label())

@@ -206,29 +206,54 @@ mod example3 {
     }
 }
 
-/// Vest combinators
+/// Same as example2 but uses Vest
 mod example4 {
     use super::*;
     use crate::vest::*;
 
     broadcast use crate::owl::axioms, axioms;
 
-    struct PairCont;
+    /// Defines the combinator for a format
+    ///
+    /// struct format {
+    ///   tag: Data<adv> |1|,
+    ///   data: if tag == 0 then Name(data) else Data<adv>
+    /// }
+    closed spec fn spec_format(data: Data) -> SpecDepend<Bytes, Bytes> {
+        SpecDepend(
+            Bytes { len: 1, pred: Ghost(|d: Data| d.is_public() && d@.len() == 1) },
+            PairCont(Ghost(data))@,
+        )
+    }
+
+    fn format(data: Ghost<Data>) -> (res: Depend<Bytes, Bytes, PairCont>)
+        ensures
+            res@ == spec_format(data@),
+            res.parse_requires(),
+            res.serialize_requires(),
+    {
+        Depend(
+            Bytes { len: 1, pred: Ghost(|d: Data| d.is_public() && d@.len() == 1) },
+            PairCont(data),
+        )
+    }
+
+    struct PairCont(Ghost<Data>);
 
     impl SpecExecFn for PairCont {
         type Input = Data;
         type Output = Bytes;
 
         closed spec fn spec_call(&self, x: Seq<u8>) -> Bytes {
-            if x[0] == 0 {
-                Bytes { len: 4, pred: Ghost(|d: Data| true) }
+            if x.len() == 1 && x[0] == 0 {
+                Bytes { len: 4, pred: Ghost(|d: Data| self.0@.eq(&d)) }@
             } else {
-                Bytes { len: 8, pred: Ghost(|d: Data| d.is_public()) }
+                Bytes { len: 8, pred: Ghost(|d: Data| d.is_public()) }@
             }
         }
 
         closed spec fn requires(&self, x: &Self::Input) -> bool {
-            x.is_public() && x@.len() == 1
+            x@.len() == 1 ==> x.label_at(0).is_public()
         }
 
         closed spec fn ensures(&self, x: &Self::Input, y: Self::Output) -> bool {
@@ -236,65 +261,81 @@ mod example4 {
         }
 
         fn call(&self, x: &Self::Input) -> (y: Self::Output) {
-            if x.index(0) == 0 {
-                Bytes { len: 4, pred: Ghost(|d: Data| true) }
+            if x.len() == 1 && x.index(0) == 0 {
+                Bytes { len: 4, pred: Ghost(|d: Data| self.0@.eq(&d)) }
             } else {
                 Bytes { len: 8, pred: Ghost(|d: Data| d.is_public()) }
             }
         }
     }
 
-    closed spec fn spec_format() -> SpecDepend<Bytes, Bytes> {
-        let tag = Bytes { len: 1, pred: Ghost(|d: Data| d.is_public() && d@.len() == 1) };
-        let pair = SpecDepend(tag@, PairCont@);
-        pair
-    }
+    closed spec fn spec_name_context(data: Data, psk: Data) -> bool {
+        // name data: nonce
+        &&& data.typ() == Type::Nonce
 
-    fn format() -> (res: Depend<Bytes, Bytes, PairCont>)
-        ensures res@ == spec_format()
-    {
-        let tag = Bytes { len: 1, pred: Ghost(|d: Data| d.is_public() && d@.len() == 1) };
-        let pair = Depend(tag, PairCont);
-        pair
-
-        // let buf = Data::from_vec(vec![0, 1, 1, 1, 1]);
-        // assume(pair@.spec_input_security_policy(&buf));
-
-        // if let Ok((n, res)) = pair.parse(&buf) {
-        //     let mut out = Data::from_vec(vec![]);
-        //     pair.serialize(&res, &mut out);
+        // name psk: enckey struct {
+        //     tag: Data<adv> |1|,
+        //     data: if tag == 0 then Name(data) else Data<adv>
         // }
-
-        // let buf1 = Data::from_vec(vec![0]);
-        // let buf2 = Data::from_vec(vec![1, 1, 1, 1]);
-
-        // let res = ();
+        &&& psk.typ() matches Type::EncKey(l, p)
+        &&& data.flows(l) && l.flows_data(&psk)
+        &&& p == |d: Data| spec_format(data).spec_input_security_policy(&d)
+        &&& psk@.len() != 0
     }
 
-    // pub open spec fn spec_name_context(data: &Data, psk: &Data) -> bool {
-    //     // name data: nonce
-    //     &&& data.typ() == Type::Nonce
+    fn alice<E: Environment>(
+        env: &mut E,
+        Ghost(data): Ghost<Data>,
+        psk: &Data,
+    ) -> (res: Option<Data>)
+        requires
+            spec_name_context(data, *psk),
 
-    //     // name psk: enckey struct {
-    //     //     tag: Data<adv> |1|,
-    //     //     data: if tag == 0 then Name(data) else Data<adv>
-    //     // }
-    //     &&& psk.typ() matches Type::EncKey(l, p)
-    //     &&& data.flows(l) && l.flows_data(psk)
-    //     &&& p == |d: Data|
-    //             d.label_at(0).is_public() &&
-    //             if d@[0] == 0 {
-    //                 d@.subrange(1, d@.len() as int) == data@
-    //             } else {
-    //                 d.is_public()
-    //             }
-    //     &&& psk@.len() != 0
-    // }
+        ensures
+            res matches Some(res) ==>
+            !psk.is_public() ==>
+            res@ == data@,
+    {
+        if let Some(tagged) = Data::decrypt(psk, &env.input()) {
+            let format = format(Ghost(data));
 
-    // fn test() {
-    //     let format = format();
+            proof {
+                // Somehow unable to trigger this automatically
+                format@.prop_input_security_policy_corrupt(&tagged);
+                assert(tagged.is_public() ==> format@.spec_input_security_policy_corrupt(&tagged));
+            }
 
+            if let Ok((n, res)) = format.parse(&tagged) {
+                assert(psk.is_public() ==> res.0.is_public()); // Corrupt case
+                assert(!psk.is_public() ==> res.0@[0] != 0 ==> res.1.is_public());
+                assert(!psk.is_public() ==> res.0@[0] == 0 ==> res.1.eq(&data));
 
+                if res.0.len() != 0 && res.0.index(0) == 0 {
+                    return Some(res.1);
+                }
+            }
+        }
+
+        None
+    }
+
+    // fn bob<E: Environment>(
+    //     env: &mut E,
+    //     data: &Data,
+    //     psk: &Data,
+    // )
+    //     requires
+    //         spec_name_context(*data, *psk),
+    // {
+    //     let content = (Data::from_vec(vec![1]), &Data::from_vec(vec![1, 1, 0]));
+
+    //     // env.output(&Data::encrypt(psk, &content));
+
+    //     // // FAIL: env.output(&Data::encrypt(psk, &Data::from_vec(vec![0]).concat(&Data::from_vec(vec![1, 1, 0]))));
+
+    //     // let tagged = Data::from_vec(vec![0]).concat(data);
+    //     // assert(tagged@.subrange(1, tagged@.len() as int) == data@);
+    //     // env.output(&Data::encrypt(psk, &tagged));
     // }
 }
 

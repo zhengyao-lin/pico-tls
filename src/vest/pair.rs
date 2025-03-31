@@ -86,6 +86,12 @@ impl<A: SpecCombinator + PrefixSecure, B: SpecCombinator> SpecCombinator for Spe
                 ==> self.1(a).spec_input_security_policy(&s.skip(n))
     }
 
+    open spec fn spec_input_security_policy_corrupt(&self, s: &Data) -> bool {
+        &&& self.0.spec_input_security_policy_corrupt(s)
+        &&& self.0.spec_parse(s@) matches Some((n, a))
+                ==> self.1(a).spec_input_security_policy_corrupt(&s.skip(n))
+    }
+
     proof fn prop_parse_length(&self, s: Seq<u8>) {}
 
     proof fn prop_serialize_parse_roundtrip(&self, v: Self::Type) {
@@ -107,6 +113,8 @@ impl<A: SpecCombinator + PrefixSecure, B: SpecCombinator> SpecCombinator for Spe
             }
         }
     }
+
+    proof fn prop_input_security_policy_corrupt(&self, s: &Data) {}
 }
 
 /// View for an exec dependent pair
@@ -133,7 +141,10 @@ impl<A: Combinator, B: Combinator, F: SpecExecFn<Input = A::Type, Output = B>> C
         &&& forall |x, y| self.1.ensures(x, y) ==> y.parse_requires()
 
         // Continuation can requires facts in the output security policy
-        &&& forall |x| #[trigger] self.0.spec_output_security_policy(x) ==> self.1.requires(x)
+        &&& forall |x|
+                self.0.spec_output_security_policy(x) ||
+                self.0.spec_output_security_policy_corrupt(x)
+                ==> #[trigger] self.1.requires(x)
     }
 
     open spec fn serialize_requires(&self) -> bool {
@@ -141,7 +152,10 @@ impl<A: Combinator, B: Combinator, F: SpecExecFn<Input = A::Type, Output = B>> C
         &&& forall |x, y| self.1.ensures(x, y) ==> y.serialize_requires()
 
         // Continuation can requires facts in the output security policy
-        &&& forall |x| #[trigger] self.0.spec_output_security_policy(x) ==> self.1.requires(x)
+        &&& forall |x|
+                self.0.spec_output_security_policy(x) ||
+                self.0.spec_output_security_policy_corrupt(x)
+                ==> #[trigger] self.1.requires(x)
     }
 
     open spec fn spec_output_security_policy(&self, v: &Self::Type) -> bool {
@@ -149,7 +163,12 @@ impl<A: Combinator, B: Combinator, F: SpecExecFn<Input = A::Type, Output = B>> C
 
         // This (together with `prop_policy_consistency`) is
         // a bit of hack to "call" an exec function `self.1` in spec mode
-        &&& forall |c: B| c@ == self@.1(v.0@) ==> #[trigger] c.spec_output_security_policy(&v.1)
+        &&& forall |c: B| #[trigger] c@ == self@.1(v.0@) ==> c.spec_output_security_policy(&v.1)
+    }
+
+    open spec fn spec_output_security_policy_corrupt(&self, v: &Self::Type) -> bool {
+        &&& self.0.spec_output_security_policy_corrupt(&v.0)
+        &&& forall |c: B| #[trigger] c@ == self@.1(v.0@) ==> c.spec_output_security_policy_corrupt(&v.1)
     }
 
     proof fn prop_policy_consistency(&self, other: &Self, v: &Self::Type) {}
@@ -185,11 +204,11 @@ impl<A: Combinator, B: Combinator, F: SpecExecFn<Input = A::Type, Output = B>> C
         // TODO: automate some of these equality reasoning better
         proof {
             assert(buf.skip(old_len)@ =~= buf0.concat(&buf.skip((old_len + n) as usize))@);
+            assert(buf.skip(old_len).take(n).eq(&buf0));
 
             // First part of self@.spec_input_security_policy
-            assert(buf.skip(old_len).take(n).eq(&buf0));
-            assert(self.0@.spec_input_security_policy(&buf.skip(old_len).take(n)));
-            assert(self.0@.spec_input_security_policy(&buf.skip(old_len)));
+            assert(self.spec_output_security_policy(v) ==> self.0@.spec_input_security_policy(&buf.skip(old_len).take(n)));
+            assert(self.spec_output_security_policy(v) ==> self.0@.spec_input_security_policy(&buf.skip(old_len)));
 
             assert(self.0@.spec_parse(buf.skip(old_len)@) is Some);
             let (n2, v0) = self.0@.spec_parse(buf.skip(old_len)@).unwrap();
@@ -198,7 +217,7 @@ impl<A: Combinator, B: Combinator, F: SpecExecFn<Input = A::Type, Output = B>> C
 
             // Second part of self@.spec_input_security_policy
             assert(buf.skip(old_len).skip(n2).eq(&buf.skip((old_len + n2) as usize)));
-            assert(self.1.spec_call(v0).spec_input_security_policy(&buf.skip(old_len).skip(n2)));
+            assert(self.spec_output_security_policy(v) ==> self.1.spec_call(v0).spec_input_security_policy(&buf.skip(old_len).skip(n2)));
         }
 
         Ok(n + m)

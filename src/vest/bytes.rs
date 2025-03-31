@@ -48,13 +48,18 @@ impl SpecCombinator for Bytes {
     }
 
     open spec fn spec_input_security_policy(&self, s: &Data) -> bool {
-        s@.len() >= self.len && self.pred@(s.subrange(0, self.len))
+        s@.len() >= self.len ==> self.pred@(s.subrange(0, self.len))
+    }
+
+    open spec fn spec_input_security_policy_corrupt(&self, s: &Data) -> bool {
+        s@.len() >= self.len ==> s.subrange(0, self.len).is_public()
     }
 
     proof fn prop_parse_length(&self, s: Seq<u8>) {}
     proof fn prop_serialize_parse_roundtrip(&self, v: Self::Type) {}
     proof fn prop_parse_serialize_roundtrip(&self, s: Seq<u8>) {}
     proof fn prop_input_security_policy_indiscern(&self, s1: &Data, s2: &Data) {}
+    proof fn prop_input_security_policy_corrupt(&self, s: &Data) {}
 }
 
 impl PrefixSecure for Bytes {
@@ -69,6 +74,10 @@ impl Combinator for Bytes {
 
     open spec fn spec_output_security_policy(&self, v: &Self::Type) -> bool {
         self.pred@(*v)
+    }
+
+    open spec fn spec_output_security_policy_corrupt(&self, v: &Self::Type) -> bool {
+        v.is_public()
     }
 
     proof fn prop_policy_consistency(&self, other: &Self, v: &Self::Type) {}

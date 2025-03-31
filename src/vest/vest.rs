@@ -10,6 +10,7 @@ pub broadcast group combinator_props {
     SpecCombinator::prop_serialize_parse_roundtrip,
     SpecCombinator::prop_parse_serialize_roundtrip,
     SpecCombinator::prop_input_security_policy_indiscern,
+    SpecCombinator::prop_input_security_policy_corrupt,
     PrefixSecure::prop_prefix_secure,
     PrefixSecure::prop_prefix_secure_policy_concat,
     PrefixSecure::prop_prefix_secure_policy_subrange,
@@ -25,6 +26,7 @@ pub trait SpecCombinator {
 
     /// Security policy on the input being parsed
     spec fn spec_input_security_policy(&self, s: &Data) -> bool;
+    spec fn spec_input_security_policy_corrupt(&self, s: &Data) -> bool;
 
     broadcast proof fn prop_parse_length(&self, s: Seq<u8>)
         ensures
@@ -42,10 +44,18 @@ pub trait SpecCombinator {
 
     /// The security policy should not distinguish "equal" Data
     broadcast proof fn prop_input_security_policy_indiscern(&self, s1: &Data, s2: &Data)
-        requires #[trigger] s1.eq(s2)
+        requires s1.eq(s2)
         ensures
-            #[trigger] self.spec_input_security_policy(s1)
-            == self.spec_input_security_policy(s2);
+            #![trigger s1.eq(s2), self.spec_input_security_policy(s1)]
+            #![trigger s1.eq(s2), self.spec_input_security_policy_corrupt(s1)]
+            self.spec_input_security_policy(s1)
+            == self.spec_input_security_policy(s2),
+            self.spec_input_security_policy_corrupt(s1)
+            == self.spec_input_security_policy_corrupt(s2);
+
+    /// A property that the corrupt policy can be weakened to public
+    broadcast proof fn prop_input_security_policy_corrupt(&self, s: &Data)
+        ensures s.is_public() ==> #[trigger] self.spec_input_security_policy_corrupt(s);
 }
 
 pub trait PrefixSecure: SpecCombinator {
@@ -59,18 +69,32 @@ pub trait PrefixSecure: SpecCombinator {
     broadcast proof fn prop_prefix_secure_policy_concat(&self, s1: &Data, s2: &Data)
         requires s1@.len() + s2@.len() <= usize::MAX,
         ensures
+            #![trigger self.spec_input_security_policy(s1), s1.concat(s2)]
+            #![trigger self.spec_input_security_policy_corrupt(s1), s1.concat(s2)]
+
             self.spec_parse(s1@) is Some ==>
-                #[trigger] self.spec_input_security_policy(s1)
-                == self.spec_input_security_policy(#[trigger] &s1.concat(s2));
+                self.spec_input_security_policy(s1)
+                == self.spec_input_security_policy(&s1.concat(s2)),
+
+            self.spec_parse(s1@) is Some ==>
+                #[trigger] self.spec_input_security_policy_corrupt(s1)
+                == self.spec_input_security_policy_corrupt(#[trigger] &s1.concat(s2)),;
 
     /// Similar to `prop_prefix_secure_policy_concat` but for subrange
     /// TODO: unify these two?
     broadcast proof fn prop_prefix_secure_policy_subrange(&self, s: &Data, n: usize)
         requires n <= s@.len()
         ensures
+            #![trigger self.spec_input_security_policy(s), s.subrange(0, n)]
+            #![trigger self.spec_input_security_policy_corrupt(s), s.subrange(0, n)]
+
             self.spec_parse(s@.subrange(0, n as int)) is Some ==>
-                #[trigger] self.spec_input_security_policy(s)
-                == self.spec_input_security_policy(#[trigger] &s.subrange(0, n));
+                self.spec_input_security_policy(s)
+                == self.spec_input_security_policy(&s.subrange(0, n)),
+
+            self.spec_parse(s@.subrange(0, n as int)) is Some ==>
+                self.spec_input_security_policy_corrupt(s)
+                == self.spec_input_security_policy_corrupt(&s.subrange(0, n));
 }
 
 pub enum ParseError {
@@ -89,13 +113,20 @@ pub trait Combinator: View where
     /// Security policy on the output type
     spec fn spec_output_security_policy(&self, v: &Self::Type) -> bool;
 
+    /// Same but for the corrupt/public case
+    spec fn spec_output_security_policy_corrupt(&self, v: &Self::Type) -> bool;
+
     /// A technical condition to make sure that combinators with equal spec
     /// has the same security policy on the output type
     broadcast proof fn prop_policy_consistency(&self, other: &Self, v: &Self::Type)
         requires self@ == other@
         ensures
-            #[trigger] self.spec_output_security_policy(v)
-            == #[trigger] other.spec_output_security_policy(v);
+            #![trigger self.spec_output_security_policy(v), other.spec_output_security_policy(v)]
+            #![trigger self.spec_output_security_policy_corrupt(v), other.spec_output_security_policy_corrupt(v)]
+            self.spec_output_security_policy(v)
+            == other.spec_output_security_policy(v),
+            self.spec_output_security_policy_corrupt(v)
+            == other.spec_output_security_policy_corrupt(v);
 
     open spec fn parse_requires(&self) -> bool {
         true
@@ -108,12 +139,14 @@ pub trait Combinator: View where
     fn parse(&self, s: &Data) -> (res: Result<(usize, Self::Type), ParseError>)
         requires
             self.parse_requires(),
-            self@.spec_input_security_policy(s),
+            self@.spec_input_security_policy(s) || self@.spec_input_security_policy_corrupt(s),
 
         ensures
             res matches Ok((n, v)) ==> {
                 &&& self@.spec_parse(s@) =~~= Some((n, v@))
-                &&& self.spec_output_security_policy(&v)
+
+                &&& self@.spec_input_security_policy(s) ==> self.spec_output_security_policy(&v)
+                &&& self@.spec_input_security_policy_corrupt(s) ==> self.spec_output_security_policy_corrupt(&v)
             },
             res is Err ==> self@.spec_parse(s@) is None,
     ;
@@ -121,7 +154,7 @@ pub trait Combinator: View where
     fn serialize(&self, v: &Self::Type, buf: &mut Data) -> (res: Result<usize, SerializeError>)
         requires
             self.serialize_requires(),
-            self.spec_output_security_policy(v),
+            self.spec_output_security_policy(v) || self.spec_output_security_policy_corrupt(v),
 
         ensures
             res matches Ok(n) ==> {
@@ -135,8 +168,8 @@ pub trait Combinator: View where
                 &&& buf.take(old_len).eq(old(buf))
                 &&& buf.skip(old_len)@ =~= buf2
 
-                // &&& self.parse_requires(&buf.skip(old_len))
-                &&& self@.spec_input_security_policy(&buf.skip(old_len))
+                &&& self.spec_output_security_policy(v) ==> self@.spec_input_security_policy(&buf.skip(old_len))
+                &&& self.spec_output_security_policy_corrupt(v) ==> self@.spec_input_security_policy_corrupt(&buf.skip(old_len))
             },
             res is Err ==> self@.spec_serialize(v@) is None,
     ;
