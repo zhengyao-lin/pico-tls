@@ -219,14 +219,14 @@ mod example4 {
     ///   tag: Data<adv> |1|,
     ///   data: if tag == 0 then Name(data) else Data<adv>
     /// }
-    closed spec fn spec_format(data: Data) -> SpecDepend<Bytes, Bytes> {
+    closed spec fn spec_format(data: &Data) -> SpecDepend<Bytes, Bytes> {
         SpecDepend(
             Bytes { len: 1, pred: Ghost(|d: Data| d.is_public() && d@.len() == 1) },
             PairCont(Ghost(data))@,
         )
     }
 
-    fn format(data: Ghost<Data>) -> (res: Depend<Bytes, Bytes, PairCont>)
+    fn format(data: Ghost<&Data>) -> (res: Depend<Bytes, Bytes, PairCont>)
         ensures
             res@ == spec_format(data@),
             res.parse_requires(),
@@ -238,9 +238,9 @@ mod example4 {
         )
     }
 
-    struct PairCont(Ghost<Data>);
+    struct PairCont<'a>(Ghost<&'a Data>);
 
-    impl SpecExecFn for PairCont {
+    impl<'a> SpecExecFn for PairCont<'a> {
         type Input = Data;
         type Output = Bytes;
 
@@ -269,7 +269,7 @@ mod example4 {
         }
     }
 
-    closed spec fn spec_name_context(data: Data, psk: Data) -> bool {
+    closed spec fn spec_name_context(data: &Data, psk: &Data) -> bool {
         // name data: nonce
         &&& data.typ() == Type::Nonce
 
@@ -278,18 +278,18 @@ mod example4 {
         //     data: if tag == 0 then Name(data) else Data<adv>
         // }
         &&& psk.typ() matches Type::EncKey(l, p)
-        &&& data.flows(l) && l.flows_data(&psk)
+        &&& data.flows(l) && l.flows_data(psk)
         &&& p == |d: Data| spec_format(data).spec_input_security_policy(&d)
         &&& psk@.len() != 0
     }
 
     fn alice<E: Environment>(
         env: &mut E,
-        Ghost(data): Ghost<Data>,
+        Ghost(data): Ghost<&Data>,
         psk: &Data,
     ) -> (res: Option<Data>)
         requires
-            spec_name_context(data, *psk),
+            spec_name_context(data, psk),
 
         ensures
             res matches Some(res) ==>
@@ -305,13 +305,13 @@ mod example4 {
                 assert(tagged.is_public() ==> format@.spec_input_security_policy_corrupt(&tagged));
             }
 
-            if let Ok((n, res)) = format.parse(&tagged) {
-                assert(psk.is_public() ==> res.0.is_public()); // Corrupt case
-                assert(!psk.is_public() ==> res.0@[0] != 0 ==> res.1.is_public());
-                assert(!psk.is_public() ==> res.0@[0] == 0 ==> res.1.eq(&data));
+            if let Ok((n, (tag, res))) = format.parse(&tagged) {
+                assert(psk.is_public() ==> tag.is_public() && res.is_public()); // Corrupt case
+                assert(!psk.is_public() ==> tag@[0] != 0 ==> res.is_public());
+                assert(!psk.is_public() ==> tag@[0] == 0 ==> res.eq(&data));
 
-                if res.0.len() != 0 && res.0.index(0) == 0 {
-                    return Some(res.1);
+                if tag.len() != 0 && tag.index(0) == 0 {
+                    return Some(res);
                 }
             }
         }
@@ -325,9 +325,21 @@ mod example4 {
     //     psk: &Data,
     // )
     //     requires
-    //         spec_name_context(*data, *psk),
+    //         spec_name_context(data, psk),
     // {
-    //     let content = (Data::from_vec(vec![1]), &Data::from_vec(vec![1, 1, 0]));
+    //     let format = format(Ghost(data));
+
+    //     let content = (Data::from_vec(vec![1]), Data::from_vec(vec![1, 1, 0]));
+    //     let mut buf = Data::from_vec(vec![]);
+
+    //     assert(format.spec_output_security_policy(&content));
+
+    //     if let Ok(n) = format.serialize(&content, &mut buf) {
+    //         assert(format@.spec_input_security_policy(&buf.skip(0)));
+    //         // assert(psk.is_public() ==> buf.is_public());
+    //         // assert(!psk.is_public() ==> buf.is_public());
+    //         // Data::encrypt(psk, &buf.subrange(0, buf.len()));
+    //     }
 
     //     // env.output(&Data::encrypt(psk, &content));
 
