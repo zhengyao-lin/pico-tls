@@ -5,6 +5,17 @@ use crate::owl::Data;
 
 verus! {
 
+pub broadcast group combinator_props {
+    SpecCombinator::prop_parse_length,
+    SpecCombinator::prop_serialize_parse_roundtrip,
+    SpecCombinator::prop_parse_serialize_roundtrip,
+    SpecCombinator::prop_input_security_policy_indiscern,
+    PrefixSecure::prop_prefix_secure,
+    PrefixSecure::prop_prefix_secure_policy_concat,
+    PrefixSecure::prop_prefix_secure_policy_subrange,
+    Combinator::prop_policy_consistency,
+}
+
 /// Specification and core properties of a (spec) combinator
 pub trait SpecCombinator {
     type Type;
@@ -15,26 +26,51 @@ pub trait SpecCombinator {
     /// Security policy on the input being parsed
     spec fn spec_input_security_policy(&self, s: &Data) -> bool;
 
-    proof fn prop_parse_length(&self, s: Seq<u8>)
+    broadcast proof fn prop_parse_length(&self, s: Seq<u8>)
         ensures
-            self.spec_parse(s) matches Some((n, _)) ==> n <= s.len();
+            (#[trigger] self.spec_parse(s)) matches Some((n, _)) ==> n <= s.len();
 
-    proof fn prop_serialize_parse_roundtrip(&self, v: Self::Type)
+    broadcast proof fn prop_serialize_parse_roundtrip(&self, v: Self::Type)
         ensures
-            self.spec_serialize(v) matches Some(b) ==>
+            (#[trigger] self.spec_serialize(v)) matches Some(b) ==>
                 self.spec_parse(b) =~= Some((b.len() as usize, v));
 
-    proof fn prop_parse_serialize_roundtrip(&self, s: Seq<u8>)
+    broadcast proof fn prop_parse_serialize_roundtrip(&self, s: Seq<u8>)
         ensures
-            self.spec_parse(s) matches Some((n, v)) ==>
+            (#[trigger] self.spec_parse(s)) matches Some((n, v)) ==>
                 self.spec_serialize(v) =~= Some(s.take(n as int));
+
+    /// The security policy should not distinguish "equal" Data
+    broadcast proof fn prop_input_security_policy_indiscern(&self, s1: &Data, s2: &Data)
+        requires #[trigger] s1.eq(s2)
+        ensures
+            #[trigger] self.spec_input_security_policy(s1)
+            == self.spec_input_security_policy(s2);
 }
 
 pub trait PrefixSecure: SpecCombinator {
-    proof fn prop_prefix_secure(&self, s1: Seq<u8>, s2: Seq<u8>)
+    broadcast proof fn prop_prefix_secure(&self, s1: Seq<u8>, s2: Seq<u8>)
         requires s1.len() + s2.len() <= usize::MAX,
         ensures self.spec_parse(s1) is Some ==>
-            self.spec_parse(s1 + s2) =~= self.spec_parse(s1);
+            #[trigger] self.spec_parse(s1 + s2) =~= self.spec_parse(s1);
+
+    /// The security policy is "prefix secure" if it does not "talk about"
+    /// the data that is not being parsed
+    broadcast proof fn prop_prefix_secure_policy_concat(&self, s1: &Data, s2: &Data)
+        requires s1@.len() + s2@.len() <= usize::MAX,
+        ensures
+            self.spec_parse(s1@) is Some ==>
+                #[trigger] self.spec_input_security_policy(s1)
+                == self.spec_input_security_policy(#[trigger] &s1.concat(s2));
+
+    /// Similar to `prop_prefix_secure_policy_concat` but for subrange
+    /// TODO: unify these two?
+    broadcast proof fn prop_prefix_secure_policy_subrange(&self, s: &Data, n: usize)
+        requires n <= s@.len()
+        ensures
+            self.spec_parse(s@.subrange(0, n as int)) is Some ==>
+                #[trigger] self.spec_input_security_policy(s)
+                == self.spec_input_security_policy(#[trigger] &s.subrange(0, n));
 }
 
 pub enum ParseError {
@@ -52,6 +88,14 @@ pub trait Combinator: View where
 
     /// Security policy on the output type
     spec fn spec_output_security_policy(&self, v: &Self::Type) -> bool;
+
+    /// A technical condition to make sure that combinators with equal spec
+    /// has the same security policy on the output type
+    broadcast proof fn prop_policy_consistency(&self, other: &Self, v: &Self::Type)
+        requires self@ == other@
+        ensures
+            #[trigger] self.spec_output_security_policy(v)
+            == #[trigger] other.spec_output_security_policy(v);
 
     open spec fn parse_requires(&self) -> bool {
         true

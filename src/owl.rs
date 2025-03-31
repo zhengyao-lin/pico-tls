@@ -23,6 +23,7 @@ pub broadcast group data_axioms {
     Data::axiom_subrange_label,
     Data::axiom_concat_label_left,
     Data::axiom_concat_label_right,
+    // Data::axiom_concat_undefined,
     Data::axiom_indiscern,
     Data::axiom_len_bounded,
     Data::lemma_flows_data_trans,
@@ -95,6 +96,7 @@ pub enum Type {
     ExpandKey(spec_fn(Seq<u8>) -> Option<Type>),
     EncKey(Label, SecPred),
     Nonce,
+    Undefined,
 }
 
 pub struct Data(Vec<u8>);
@@ -164,21 +166,27 @@ impl Data {
             0 <= start2 <= end2 <= end1 - start1,
 
         // Type of the subrange carries over
-        ensures #[trigger] (#[trigger] self.subrange(start1, end1)).range_type(start2, end2)
+        ensures #[trigger] self.subrange(start1, end1).range_type(start2, end2)
             == self.range_type((start2 + start1) as usize, (end2 + start1) as usize);
 
     /// `concat` preserves the types of both parts (left chunk)
     #[verifier::external_body]
     pub broadcast proof fn axiom_concat_type_left(&self, other: &Data, start: usize, end: usize)
         requires 0 <= start <= end <= self@.len()
-        ensures #[trigger] (#[trigger] self.concat(other)).range_type(start, end) == self.range_type(start, end);
+        ensures #[trigger] self.concat(other).range_type(start, end) == self.range_type(start, end);
 
     /// `concat` preserves the types of both parts (right chunk)
     #[verifier::external_body]
     pub broadcast proof fn axiom_concat_type_right(&self, other: &Data, start: usize, end: usize)
         requires self@.len() <= start <= end <= self@.len() + other@.len()
-        ensures #[trigger] (#[trigger] self.concat(other)).range_type(start, end)
+        ensures #[trigger] self.concat(other).range_type(start, end)
                 == other.range_type((start - self@.len()) as usize, (end - self@.len()) as usize);
+
+    // /// Types are destroyed across the concat boundary
+    // #[verifier::external_body]
+    // pub broadcast proof fn axiom_concat_undefined(&self, other: &Data, start: usize, end: usize)
+    //     requires 0 <= start < self@.len() < end <= self@.len() + other@.len()
+    //     ensures #[trigger] self.concat(other).range_type(start, end) == Type::Undefined;
 
     /// `subrange` preserves labels
     #[verifier::external_body]
@@ -186,19 +194,19 @@ impl Data {
         requires
             0 <= start <= end <= self@.len(),
             0 <= i < end - start,
-        ensures #[trigger] (#[trigger] self.subrange(start, end)).label_at(i) == self.label_at((i + start) as usize);
+        ensures #[trigger] self.subrange(start, end).label_at(i) == self.label_at((i + start) as usize);
 
     /// `concat` preserves labels (left)
     #[verifier::external_body]
     pub broadcast proof fn axiom_concat_label_left(&self, other: &Data, i: usize)
         requires 0 <= i < self@.len()
-        ensures #[trigger] (#[trigger] self.concat(other)).label_at(i) == self.label_at(i);
+        ensures #[trigger] self.concat(other).label_at(i) == self.label_at(i);
 
     /// `concat` preserves labels (right)
     #[verifier::external_body]
     pub broadcast proof fn axiom_concat_label_right(&self, other: &Data, i: usize)
         requires self@.len() <= i < self@.len() + other@.len()
-        ensures #[trigger] (#[trigger] self.concat(other)).label_at(i) == other.label_at((i - self@.len()) as usize);
+        ensures #[trigger] self.concat(other).label_at(i) == other.label_at((i - self@.len()) as usize);
 
     /// Definition of spec_concat
     #[verifier::external_body]
@@ -247,7 +255,7 @@ impl Data {
     }
 
     /// Any predicate cannot discern between two equal `Data`s
-    /// TODO: maybe too strong?
+    /// TODO: maybe too strong? could be made a property of a predicate
     #[verifier::external_body]
     pub broadcast proof fn axiom_indiscern(&self, other: &Data, pred: SecPred)
         requires self.eq(other)
